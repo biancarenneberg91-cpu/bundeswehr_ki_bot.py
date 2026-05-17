@@ -1,1 +1,1 @@
-worker: python bundeswehrbot.py
+worker: python bundeswehr_ki_bot.py
