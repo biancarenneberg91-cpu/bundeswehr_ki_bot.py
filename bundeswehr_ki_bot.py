@@ -1,332 +1,777 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
+import sqlite3
 import os
 from datetime import datetime
-import random
 
-TOKEN = os.getenv("KI_TOKEN")
+TOKEN = os.getenv("TOKEN")
 
-BOT_ZENTRALE = "bot-zentrale"
+GUILD_ID = 123456789012345678
 
-BEWERBUNG_CHANNEL = "𝐁𝐄𝐖𝐄𝐑𝐁𝐔𝐍𝐆𝐄𝐍"
-CHECK_CHANNEL = "bewerbungs-check"
+DB = "bundeswehr.db"
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents = discord.Intents.all()
 
-bot = commands.Bot(command_prefix="?", intents=intents)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents
+)
 
-einsatz_nummer = 1000
 
+# =========================================
+# DATABASE
+# =========================================
+
+def db():
+    return sqlite3.connect(DB)
+
+
+def setup_db():
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS dienst (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        name TEXT,
+        start TEXT,
+        ende TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS inventar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        item TEXT,
+        typ TEXT,
+        von TEXT,
+        zeit TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS personal (
+        user_id INTEGER PRIMARY KEY,
+        rang TEXT,
+        status TEXT,
+        notiz TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS einsaetze (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        titel TEXT,
+        ort TEXT,
+        leitung TEXT,
+        status TEXT,
+        zeit TEXT
+    )
+    """)
+
+    con.commit()
+    con.close()
+
+
+# =========================================
+# HILFE
+# =========================================
 
 def kanal(guild, name):
-    return discord.utils.get(guild.text_channels, name=name)
+
+    return discord.utils.get(
+        guild.text_channels,
+        name=name
+    )
 
 
-async def kanal_erstellen(guild, name):
-    ch = kanal(guild, name)
-    if ch:
-        return ch
-    return await guild.create_text_channel(name)
-
-
-def bewerbung_pruefen(text):
-    punkte = 100
-    gruende = []
-    lower = text.lower()
-
-    if len(text) < 200:
-        punkte -= 30
-        gruende.append("❌ Bewerbung ist sehr kurz.")
-
-    if len(text) > 600:
-        punkte += 5
-        gruende.append("✅ Ausführliche Bewerbung.")
-
-    schlechte_woerter = [
-        "hurensohn",
-        "nigger",
-        "niga",
-        "hs",
-        "opfer",
-        "spast"
-    ]
-
-    if any(wort in lower for wort in schlechte_woerter):
-        punkte -= 60
-        gruende.append("❌ Unangemessene Wörter gefunden.")
-
-    wichtige_woerter = [
-        "motivation",
-        "erfahrung",
-        "team",
-        "respekt",
-        "dienst",
-        "bundeswehr",
-        "notruf hamburg",
-        "disziplin",
-        "aktiv"
-    ]
-
-    gefunden = sum(1 for wort in wichtige_woerter if wort in lower)
-
-    if gefunden >= 4:
-        punkte += 10
-        gruende.append("✅ Gute Motivation erkennbar.")
-    elif gefunden >= 2:
-        gruende.append("🟡 Etwas Motivation erkennbar.")
-    else:
-        punkte -= 25
-        gruende.append("❌ Wenig Motivation erkennbar.")
-
-    unserioes = [
-        "kein plan",
-        "weiß nicht",
-        "weiss nicht",
-        "kp",
-        "egal",
-        "einfach so"
-    ]
-
-    if any(wort in lower for wort in unserioes):
-        punkte -= 25
-        gruende.append("❌ Antwort wirkt unseriös.")
-
-    punkte = max(0, min(100, punkte))
-
-    if punkte >= 80:
-        status = "🟢 Sehr gut"
-        empfehlung = "Annehmen oder Gespräch führen."
-    elif punkte >= 60:
-        status = "🟡 Mittel"
-        empfehlung = "Gespräch machen."
-    else:
-        status = "🔴 Schwach"
-        empfehlung = "Eher ablehnen oder nachfragen."
-
-    if not gruende:
-        gruende.append("✅ Keine großen Probleme gefunden.")
-
-    return punkte, status, empfehlung, gruende
-
+# =========================================
+# READY
+# =========================================
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user} KI-Bot online!")
 
+    setup_db()
+
+    print(f"{bot.user} online!")
+
+    guild = discord.Object(
+        id=GUILD_ID
+    )
+
+    bot.tree.copy_global_to(
+        guild=guild
+    )
+
+    synced = await bot.tree.sync(
+        guild=guild
+    )
+
+    print(f"{len(synced)} Commands geladen.")
+
+
+# =========================================
+# WELCOME
+# =========================================
 
 @bot.event
-async def on_message(message):
-    global einsatz_nummer
+async def on_member_join(member):
 
-    if message.author == bot.user:
-        return
+    welcome = kanal(
+        member.guild,
+        "willkommen"
+    )
 
-    # =========================
-    # APPY BEWERBUNGS CHECK
-    # =========================
-
-    if message.channel.name == BEWERBUNG_CHANNEL and message.author.bot:
-        text = message.content or ""
-
-        if message.embeds:
-            for embed_data in message.embeds:
-                if embed_data.title:
-                    text += "\n" + embed_data.title
-
-                if embed_data.description:
-                    text += "\n" + embed_data.description
-
-                for field in embed_data.fields:
-                    text += f"\n{field.name}: {field.value}"
-
-        punkte, status, empfehlung, gruende = bewerbung_pruefen(text)
-
-        check_ch = kanal(message.guild, CHECK_CHANNEL)
-
-        if not check_ch:
-            print("bewerbungs-check Channel nicht gefunden.")
-            return
+    if welcome:
 
         embed = discord.Embed(
-            title="🤖 KI Bewerbungsprüfung",
-            description="Automatische Appy Analyse",
+            title="🪖 Willkommen",
+            description=(
+                f"Willkommen {member.mention}\n\n"
+                "🚨 Notruf Hamburg Bundeswehr"
+            ),
+            color=0x2E8B57
+        )
+
+        embed.set_thumbnail(
+            url=member.display_avatar.url
+        )
+
+        await welcome.send(
+            embed=embed
+        )
+
+    rolle = discord.utils.get(
+        member.guild.roles,
+        name="Bewerber"
+    )
+
+    if rolle:
+        await member.add_roles(rolle)
+
+
+# =========================================
+# SETUP
+# =========================================
+
+@bot.tree.command(
+    name="setup",
+    description="Erstellt Bundeswehr System"
+)
+async def setup(
+    interaction: discord.Interaction
+):
+
+    if not interaction.user.guild_permissions.administrator:
+
+        return await interaction.response.send_message(
+            "❌ Keine Rechte.",
+            ephemeral=True
+        )
+
+    await interaction.response.defer(
+        ephemeral=True
+    )
+
+    channels = [
+
+        "willkommen",
+        "ankundigungen",
+        "bewerbungen",
+        "bewerbungs-check",
+        "dienstmeldungen",
+        "alarmierungen",
+        "einsaetze",
+        "bw-funk",
+        "waffenlogs",
+        "personalakten",
+        "befoerderungen",
+        "logs"
+
+    ]
+
+    for ch in channels:
+
+        if not kanal(interaction.guild, ch):
+
+            await interaction.guild.create_text_channel(
+                ch
+            )
+
+    rollen = [
+
+        "Bewerber",
+        "Rekrut",
+        "Soldat",
+        "Militärpolizei",
+        "General"
+
+    ]
+
+    for r in rollen:
+
+        if not discord.utils.get(
+            interaction.guild.roles,
+            name=r
+        ):
+
+            await interaction.guild.create_role(
+                name=r
+            )
+
+    await interaction.followup.send(
+        "✅ System erstellt.",
+        ephemeral=True
+    )
+
+
+# =========================================
+# BEWERBUNG
+# =========================================
+
+class BewerbungModal(
+    discord.ui.Modal,
+    title="🪖 Bundeswehr Bewerbung"
+):
+
+    alter = discord.ui.TextInput(
+        label="Wie alt sind sie?"
+    )
+
+    name = discord.ui.TextInput(
+        label="Wie heißen sie?"
+    )
+
+    spielzeit = discord.ui.TextInput(
+        label="Wie lange spielen sie Notruf Hamburg?"
+    )
+
+    motivation = discord.ui.TextInput(
+        label="Warum wollen sie zur Bundeswehr?",
+        style=discord.TextStyle.paragraph
+    )
+
+    staerken = discord.ui.TextInput(
+        label="Was bringen sie mit?",
+        style=discord.TextStyle.paragraph
+    )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        bewerbung = kanal(
+            interaction.guild,
+            "bewerbungen"
+        )
+
+        check = kanal(
+            interaction.guild,
+            "bewerbungs-check"
+        )
+
+        text = (
+            self.motivation.value.lower()
+            + " " +
+            self.staerken.value.lower()
+        )
+
+        punkte = 100
+        analyse = []
+
+        if len(text) < 100:
+            punkte -= 20
+            analyse.append(
+                "❌ Wenig Motivation"
+            )
+
+        gute = [
+
+            "team",
+            "respekt",
+            "disziplin",
+            "bundeswehr",
+            "helfen"
+
+        ]
+
+        gefunden = sum(
+            1 for wort in gute
+            if wort in text
+        )
+
+        if gefunden >= 3:
+
+            punkte += 10
+
+            analyse.append(
+                "✅ Gute Motivation"
+            )
+
+        else:
+
+            punkte -= 10
+
+            analyse.append(
+                "🟡 Wenig Motivation"
+            )
+
+        if punkte >= 80:
+            status = "🟢 Sehr gut"
+
+        elif punkte >= 60:
+            status = "🟡 Mittel"
+
+        else:
+            status = "🔴 Schwach"
+
+        embed = discord.Embed(
+            title="🪖 Neue Bewerbung",
             color=0x2E8B57
         )
 
         embed.add_field(
-            name="📊 Bewertung",
-            value=f"{punkte}/100",
-            inline=True
-        )
-
-        embed.add_field(
-            name="📌 Status",
-            value=status,
-            inline=True
-        )
-
-        embed.add_field(
-            name="💡 Empfehlung",
-            value=empfehlung,
+            name="👤 Bewerber",
+            value=interaction.user.mention,
             inline=False
         )
 
         embed.add_field(
-            name="📝 Analyse",
-            value="\n".join(gruende)[:1000],
+            name="Alter",
+            value=self.alter.value,
             inline=False
         )
 
         embed.add_field(
-            name="📥 Bewerbung",
-            value=message.jump_url,
+            name="Name",
+            value=self.name.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Spielzeit",
+            value=self.spielzeit.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Motivation",
+            value=self.motivation.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Stärken",
+            value=self.staerken.value,
             inline=False
         )
 
         embed.timestamp = datetime.now()
 
-        await check_ch.send(embed=embed)
+        if bewerbung:
+            await bewerbung.send(
+                embed=embed
+            )
 
-    # =========================
-    # BOT ZENTRALE
-    # =========================
+        if check:
 
-    if message.channel.name != BOT_ZENTRALE:
-        await bot.process_commands(message)
-        return
+            check_embed = discord.Embed(
+                title="🤖 KI Bewerbungsprüfung",
+                color=0x3498db
+            )
 
-    content = message.content
+            check_embed.add_field(
+                name="📊 Bewertung",
+                value=f"{punkte}/100"
+            )
 
-    if content.startswith("AUFGABE:create_channel:"):
-        channel_name = content.split(":")[2]
+            check_embed.add_field(
+                name="📌 Status",
+                value=status
+            )
 
-        if kanal(message.guild, channel_name):
-            await message.channel.send(f"ℹ️ `{channel_name}` existiert bereits.")
-        else:
-            await message.guild.create_text_channel(channel_name)
-            await message.channel.send(f"✅ Channel `{channel_name}` erstellt.")
+            check_embed.add_field(
+                name="📝 Analyse",
+                value="\n".join(analyse),
+                inline=False
+            )
 
-    elif content == "AUFGABE:status":
-        await message.channel.send(
-            "🤖 KI-Bot online.\n"
-            "✅ Appy-Bewerbungsprüfung aktiv\n"
-            "✅ Alarmanalyse aktiv\n"
-            "✅ Channel-System aktiv\n"
-            "✅ Funkweiterleitung aktiv"
+            await check.send(
+                embed=check_embed
+            )
+
+        try:
+
+            dm = discord.Embed(
+                title="🪖 Bewerbung abgeschickt",
+                description=(
+                    f"📊 Bewertung: {punkte}/100\n"
+                    f"📌 Status: {status}"
+                ),
+                color=0x2E8B57
+            )
+
+            await interaction.user.send(
+                embed=dm
+            )
+
+        except:
+            print("DM Fehler")
+
+        await interaction.response.send_message(
+            "✅ Bewerbung abgeschickt.",
+            ephemeral=True
         )
 
-    elif content.startswith("ALARM:"):
-        daten = content.replace("ALARM:", "").split("|")
 
-        if len(daten) >= 5:
-            stufe, ort, bedrohung, ausruestung, melder = daten
+@bot.tree.command(
+    name="bewerbung",
+    description="Öffnet Bewerbung"
+)
+async def bewerbung(
+    interaction: discord.Interaction
+):
 
-            einsatz_nummer += 1
+    await interaction.response.send_modal(
+        BewerbungModal()
+    )
 
-            analyse = []
-            b = bedrohung.lower()
 
-            if "terror" in b or "geisel" in b:
-                analyse = [
-                    "🪖 Militärpolizei",
-                    "🚑 Sanitäter",
-                    "🔫 Schwere Ausrüstung"
-                ]
-                alarmstufe = "ROT"
+# =========================================
+# DIENST
+# =========================================
 
-            elif "explosion" in b or "brand" in b:
-                analyse = [
-                    "🚒 Feuerwehr",
-                    "🚑 Rettungsdienst",
-                    "🪖 Bereich absichern"
-                ]
-                alarmstufe = "ROT"
+@bot.tree.command(
+    name="dienst",
+    description="In Dienst gehen"
+)
+async def dienst(
+    interaction: discord.Interaction
+):
 
-            elif "bewaffnet" in b or "schuss" in b:
-                analyse = [
-                    "🪖 Zwei BW-Streifen",
-                    "👮 Militärpolizei",
-                    "🦺 Westen empfohlen"
-                ]
-                alarmstufe = "ORANGE"
+    con = db()
+    cur = con.cursor()
 
-            else:
-                analyse = [
-                    "🪖 Standard Einheit",
-                    "📻 Lage beobachten"
-                ]
-                alarmstufe = stufe.upper()
-
-            einsatz_channel = f"einsatz-{einsatz_nummer}"
-            funk_channel = f"funk-{einsatz_nummer}"
-
-            await kanal_erstellen(message.guild, einsatz_channel)
-            await kanal_erstellen(message.guild, funk_channel)
-
-            alarm_ch = kanal(message.guild, "alarmierungen")
-            funk_ch = kanal(message.guild, "bw-funk")
-            logs_ch = kanal(message.guild, "logs")
-
-            embed = discord.Embed(
-                title=f"🚨 EINSATZ #{einsatz_nummer} | ALARM {alarmstufe}",
-                color=0xFF0000
+    cur.execute(
+        """
+        INSERT INTO dienst
+        (user_id, name, start, ende)
+        VALUES (?, ?, ?, NULL)
+        """,
+        (
+            interaction.user.id,
+            str(interaction.user),
+            datetime.now().strftime(
+                "%d.%m.%Y %H:%M"
             )
+        )
+    )
 
-            embed.add_field(name="📍 Ort", value=ort, inline=True)
-            embed.add_field(name="⚠️ Bedrohung", value=bedrohung, inline=False)
-            embed.add_field(name="🪖 Ausrüstung", value=ausruestung, inline=False)
-            embed.add_field(name="📡 Melder", value=melder, inline=True)
-            embed.add_field(name="🤖 KI Analyse", value="\n".join(analyse), inline=False)
-            embed.add_field(name="📻 Funkraum", value=f"#{funk_channel}", inline=True)
-            embed.add_field(name="🪖 Einsatzraum", value=f"#{einsatz_channel}", inline=True)
-            embed.timestamp = datetime.now()
+    con.commit()
+    con.close()
 
-            if alarm_ch:
-                await alarm_ch.send(
-                    content="@everyone 🚨 **BUNDESWEHR EINSATZ**",
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions(everyone=True)
-                )
+    ch = kanal(
+        interaction.guild,
+        "dienstmeldungen"
+    )
 
-            if funk_ch:
-                meldungen = [
-                    f"📻 KI-Leitstelle bestätigt Einsatz #{einsatz_nummer}.",
-                    f"📻 Alle verfügbaren Einheiten Richtung {ort}.",
-                    "📻 Lage wird bewertet.",
-                    "📻 Einsatzleitung bitte Rückmeldung geben."
-                ]
+    if ch:
 
-                await funk_ch.send(random.choice(meldungen))
+        await ch.send(
+            f"🟢 {interaction.user.mention} ist im Dienst."
+        )
 
-            if logs_ch:
-                await logs_ch.send(f"🤖 KI hat Einsatz #{einsatz_nummer} verarbeitet.")
-
-            await message.channel.send(
-                f"✅ Einsatz #{einsatz_nummer} verarbeitet.\n"
-                f"📻 Funk: #{funk_channel}\n"
-                f"🪖 Einsatz: #{einsatz_channel}"
-            )
-
-    await bot.process_commands(message)
+    await interaction.response.send_message(
+        "✅ Dienst aktiviert.",
+        ephemeral=True
+    )
 
 
-@bot.command()
-async def ki(ctx):
+# =========================================
+# ALARM
+# =========================================
+
+@bot.tree.command(
+    name="alarm",
+    description="Löst Alarm aus"
+)
+async def alarm(
+    interaction: discord.Interaction,
+    stufe: str,
+    ort: str,
+    bedrohung: str
+):
+
+    alarm = kanal(
+        interaction.guild,
+        "alarmierungen"
+    )
+
     embed = discord.Embed(
-        title="🤖 Ultra KI-Bot",
-        description=(
-            "✅ Appy Bewerbungsprüfung\n"
-            "✅ Alarmanalyse\n"
-            "✅ Channel-Erstellung\n"
-            "✅ Funkweiterleitung\n"
-            "✅ Einsatzanalyse"
-        ),
+        title=f"🚨 ALARMSTUFE {stufe}",
+        color=0xFF0000
+    )
+
+    embed.add_field(
+        name="📍 Ort",
+        value=ort
+    )
+
+    embed.add_field(
+        name="⚠️ Bedrohung",
+        value=bedrohung,
+        inline=False
+    )
+
+    embed.add_field(
+        name="👮 Gemeldet von",
+        value=interaction.user.mention
+    )
+
+    if alarm:
+
+        await alarm.send(
+            "@everyone 🚨",
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=True
+            )
+        )
+
+    await interaction.response.send_message(
+        "🚨 Alarm gesendet.",
+        ephemeral=True
+    )
+
+
+# =========================================
+# FUNK
+# =========================================
+
+@bot.tree.command(
+    name="funk",
+    description="Sendet Funk"
+)
+async def funk(
+    interaction: discord.Interaction,
+    text: str
+):
+
+    funk = kanal(
+        interaction.guild,
+        "bw-funk"
+    )
+
+    if funk:
+
+        await funk.send(
+            f"📻 {interaction.user.mention}: {text}"
+        )
+
+    await interaction.response.send_message(
+        "📻 Funk gesendet.",
+        ephemeral=True
+    )
+
+
+# =========================================
+# WAFFEN
+# =========================================
+
+@bot.tree.command(
+    name="waffe_geben",
+    description="Gibt Waffe"
+)
+async def waffe_geben(
+    interaction: discord.Interaction,
+    person: discord.Member,
+    waffe: str
+):
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO inventar
+        (user_id, item, typ, von, zeit)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            person.id,
+            waffe,
+            "Waffe",
+            str(interaction.user),
+            datetime.now().strftime(
+                "%d.%m.%Y %H:%M"
+            )
+        )
+    )
+
+    con.commit()
+    con.close()
+
+    logs = kanal(
+        interaction.guild,
+        "waffenlogs"
+    )
+
+    if logs:
+
+        await logs.send(
+            f"🔫 {waffe} an {person.mention} ausgegeben."
+        )
+
+    await interaction.response.send_message(
+        "✅ Waffe ausgegeben.",
+        ephemeral=True
+    )
+
+
+# =========================================
+# PERSONALAKTE
+# =========================================
+
+@bot.tree.command(
+    name="personalakte",
+    description="Erstellt Akte"
+)
+async def personalakte(
+    interaction: discord.Interaction,
+    person: discord.Member,
+    rang: str,
+    status: str,
+    notiz: str
+):
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO personal
+        (user_id, rang, status, notiz)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            person.id,
+            rang,
+            status,
+            notiz
+        )
+    )
+
+    con.commit()
+    con.close()
+
+    akte = kanal(
+        interaction.guild,
+        "personalakten"
+    )
+
+    if akte:
+
+        embed = discord.Embed(
+            title="📁 Personalakte",
+            color=0x2E8B57
+        )
+
+        embed.add_field(
+            name="👮 Soldat",
+            value=person.mention
+        )
+
+        embed.add_field(
+            name="🎖️ Rang",
+            value=rang
+        )
+
+        embed.add_field(
+            name="📋 Status",
+            value=status
+        )
+
+        embed.add_field(
+            name="📝 Notiz",
+            value=notiz,
+            inline=False
+        )
+
+        await akte.send(
+            embed=embed
+        )
+
+    await interaction.response.send_message(
+        "✅ Akte gespeichert.",
+        ephemeral=True
+    )
+
+
+# =========================================
+# STATS
+# =========================================
+
+@bot.tree.command(
+    name="stats",
+    description="Zeigt Stats"
+)
+async def stats(
+    interaction: discord.Interaction
+):
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute(
+        "SELECT COUNT(*) FROM dienst WHERE ende IS NULL"
+    )
+
+    dienst = cur.fetchone()[0]
+
+    cur.execute(
+        "SELECT COUNT(*) FROM inventar"
+    )
+
+    inventar = cur.fetchone()[0]
+
+    cur.execute(
+        "SELECT COUNT(*) FROM personal"
+    )
+
+    personal = cur.fetchone()[0]
+
+    con.close()
+
+    embed = discord.Embed(
+        title="📊 Bundeswehr Stats",
         color=0x2E8B57
     )
 
-    await ctx.send(embed=embed)
+    embed.add_field(
+        name="🟢 Im Dienst",
+        value=str(dienst)
+    )
+
+    embed.add_field(
+        name="🔫 Waffen",
+        value=str(inventar)
+    )
+
+    embed.add_field(
+        name="📁 Personalakten",
+        value=str(personal)
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        ephemeral=True
+    )
 
 
 bot.run(TOKEN)
