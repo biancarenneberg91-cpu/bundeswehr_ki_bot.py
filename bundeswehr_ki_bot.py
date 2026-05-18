@@ -7,7 +7,7 @@ import random
 TOKEN = os.getenv("KI_TOKEN")
 
 BOT_ZENTRALE = "bot-zentrale"
-BEWERBUNG_CHANNEL = "bewerbungen"
+BEWERBUNG_CHANNEL = "𝐁𝐄𝐖𝐄𝐑𝐁𝐔𝐍𝐆𝐄𝐍"
 CHECK_CHANNEL = "bewerbungs-check"
 
 intents = discord.Intents.default()
