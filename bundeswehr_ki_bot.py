@@ -4,7 +4,7 @@ from discord import app_commands
 import os
 from datetime import datetime
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("KI_TOKEN")
 
 GUILD_ID =1504190915235811360
 
