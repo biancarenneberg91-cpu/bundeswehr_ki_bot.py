@@ -3,10 +3,11 @@ from discord.ext import commands
 import os
 import asyncio
 from datetime import datetime
+from gtts import gTTS
 
 TOKEN = os.getenv("KI_TOKEN")
 
-GUILD_ID = 123456789012345678  # DEINE SERVER-ID
+GUILD_ID = 123456789012345678  # DEINE SERVER-ID EINTRAGEN
 
 BEWERBUNG_CATEGORY_ID = 1504190916737368328
 PANEL_CHANNEL_ID = 1504203869130064035
@@ -26,12 +27,7 @@ def bewerbung_auswerten(text):
     analyse = []
     lower = text.lower()
 
-    pflicht = ["1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9."]
-    fehlend = []
-
-    for p in pflicht:
-        if p not in lower:
-            fehlend.append(p)
+    fehlend = [p for p in ["1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9."] if p not in lower]
 
     if fehlend:
         punkte -= len(fehlend) * 10
@@ -41,13 +37,8 @@ def bewerbung_auswerten(text):
         punkte -= 25
         analyse.append("❌ Bewerbung ist zu kurz.")
 
-    gute_woerter = [
-        "team", "respekt", "disziplin", "aktiv",
-        "bundeswehr", "helfen", "einsatz",
-        "notruf hamburg", "erfahrung", "lernen"
-    ]
-
-    gefunden = sum(1 for wort in gute_woerter if wort in lower)
+    gute = ["team", "respekt", "disziplin", "aktiv", "bundeswehr", "helfen", "einsatz", "notruf hamburg", "erfahrung", "lernen"]
+    gefunden = sum(1 for wort in gute if wort in lower)
 
     if gefunden >= 5:
         punkte += 10
@@ -58,12 +49,9 @@ def bewerbung_auswerten(text):
         punkte -= 20
         analyse.append("❌ Wenig Motivation erkannt.")
 
-    schlechte_woerter = [
-        "hurensohn", "nigger", "niga", "hs",
-        "opfer", "spast", "kacke", "scheiße"
-    ]
+    schlechte = ["hurensohn", "nigger", "niga", "hs", "opfer", "spast", "kacke", "scheiße"]
 
-    if any(wort in lower for wort in schlechte_woerter):
+    if any(wort in lower for wort in schlechte):
         punkte -= 80
         analyse.append("❌ Unangemessene Wörter erkannt.")
 
@@ -85,17 +73,27 @@ def bewerbung_auswerten(text):
     return punkte, analyse, entscheidung, fehlend
 
 
-@bot.event
-async def on_ready():
-    print(f"{bot.user} Bewerbungssystem online!")
+async def speak_in_voice(interaction, text, filename="tts.mp3"):
+    if not interaction.user.voice:
+        await interaction.followup.send("❌ Du bist in keinem Voicechannel.", ephemeral=True)
+        return
 
-    bot.add_view(BewerbungView())
+    voice_channel = interaction.user.voice.channel
 
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.copy_global_to(guild=guild)
-    synced = await bot.tree.sync(guild=guild)
+    if interaction.guild.voice_client:
+        vc = interaction.guild.voice_client
+        if vc.channel != voice_channel:
+            await vc.move_to(voice_channel)
+    else:
+        vc = await voice_channel.connect()
 
-    print(f"{len(synced)} Commands geladen.")
+    tts = gTTS(text=text, lang="de")
+    tts.save(filename)
+
+    if vc.is_playing():
+        vc.stop()
+
+    vc.play(discord.FFmpegPCMAudio(filename))
 
 
 class BewerbungSelect(discord.ui.Select):
@@ -124,7 +122,8 @@ class BewerbungSelect(discord.ui.Select):
                 ephemeral=True
             )
 
-        channel_name = f"bewerbung-{interaction.user.name}".lower()
+        safe_name = interaction.user.name.lower().replace(" ", "-")
+        channel_name = f"bewerbung-{safe_name}"
 
         existing = discord.utils.get(guild.text_channels, name=channel_name)
 
@@ -136,13 +135,11 @@ class BewerbungSelect(discord.ui.Select):
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-
             interaction.user: discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
                 read_message_history=True
             ),
-
             guild.me: discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
@@ -171,7 +168,7 @@ class BewerbungSelect(discord.ui.Select):
                 "7. Warum sollen wir uns für sie entscheiden?\n"
                 "8. Für welche Kategorie wollen sie?\n"
                 "9. Sind sie bereit für ein Gespräch? Ja/Nein\n\n"
-                "⏳ Sobald du deine Bewerbung sendest, prüft der Bot sie nach 60 Sekunden automatisch."
+                "⏳ Nach deiner Nachricht wartet der Bot **60 Sekunden** und prüft dann automatisch."
             ),
             color=0x2E8B57
         )
@@ -192,6 +189,19 @@ class BewerbungView(discord.ui.View):
         self.add_item(BewerbungSelect())
 
 
+@bot.event
+async def on_ready():
+    print(f"{bot.user} Bewerbung + Voice System online!")
+
+    bot.add_view(BewerbungView())
+
+    guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
+    synced = await bot.tree.sync(guild=guild)
+
+    print(f"{len(synced)} Commands geladen.")
+
+
 @bot.tree.command(name="setup", description="Erstellt Bewerbungs-Channels")
 async def setup(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -199,14 +209,7 @@ async def setup(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    channels = [
-        "bewerbungs-check",
-        "annahmen",
-        "ablehnungen",
-        "logs"
-    ]
-
-    for ch in channels:
+    for ch in ["bewerbungs-check", "annahmen", "ablehnungen", "logs"]:
         if not kanal(interaction.guild, ch):
             await interaction.guild.create_text_channel(ch)
 
@@ -221,10 +224,7 @@ async def bewerbung_panel(interaction: discord.Interaction):
     panel_channel = interaction.guild.get_channel(PANEL_CHANNEL_ID)
 
     if not panel_channel:
-        return await interaction.response.send_message(
-            "❌ Panel-Channel wurde nicht gefunden.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Panel-Channel wurde nicht gefunden.", ephemeral=True)
 
     embed = discord.Embed(
         title="📋 Appy Bot",
@@ -233,11 +233,49 @@ async def bewerbung_panel(interaction: discord.Interaction):
     )
 
     await panel_channel.send(embed=embed, view=BewerbungView())
+    await interaction.response.send_message("✅ Bewerbungs-Panel wurde gesendet.", ephemeral=True)
 
-    await interaction.response.send_message(
-        "✅ Bewerbungs-Panel wurde gesendet.",
-        ephemeral=True
+
+@bot.tree.command(name="sagen", description="Bot spricht im Voice")
+async def sagen(interaction: discord.Interaction, text: str):
+    await interaction.response.defer(ephemeral=True)
+    await speak_in_voice(interaction, text, "tts.mp3")
+    await interaction.followup.send("🔊 Bot spricht jetzt.", ephemeral=True)
+
+
+@bot.tree.command(name="alarm_voice", description="Alarmansage im Voice")
+async def alarm_voice(interaction: discord.Interaction, stufe: str, ort: str):
+    await interaction.response.defer(ephemeral=True)
+
+    text = (
+        f"Achtung Achtung. Alarmstufe {stufe}. "
+        f"Einsatzort {ort}. Alle verfügbaren Einheiten sofort antreten."
     )
+
+    await speak_in_voice(interaction, text, "alarm.mp3")
+    await interaction.followup.send("🚨 Alarmansage abgespielt.", ephemeral=True)
+
+
+@bot.tree.command(name="voice_leave", description="Bot verlässt Voice")
+async def voice_leave(interaction: discord.Interaction):
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("✅ Bot hat den Voicechannel verlassen.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Bot ist in keinem Voicechannel.", ephemeral=True)
+
+
+@bot.tree.command(name="close_bewerbung", description="Schließt ein Bewerbungsticket")
+async def close_bewerbung(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        return await interaction.response.send_message("❌ Keine Rechte.", ephemeral=True)
+
+    if interaction.channel.name.startswith("bewerbung-"):
+        await interaction.response.send_message("✅ Ticket wird geschlossen.", ephemeral=True)
+        await asyncio.sleep(3)
+        await interaction.channel.delete()
+    else:
+        await interaction.response.send_message("❌ Das ist kein Bewerbungsticket.", ephemeral=True)
 
 
 @bot.event
@@ -299,7 +337,6 @@ async def on_message(message):
             f"Es fehlen wahrscheinlich diese Punkte: **{', '.join(fehlend)}**\n\n"
             "Bitte ergänze die fehlenden Antworten. Danach prüfe ich erneut."
         )
-
         processing_tickets.discard(message.channel.id)
         return
 
@@ -314,11 +351,7 @@ async def on_message(message):
         titel = "❌ Bewerbung abgelehnt"
         dm_text = "Deine Bewerbung wurde leider abgelehnt. Du kannst es später erneut versuchen."
 
-    embed = discord.Embed(
-        title=titel,
-        color=farbe
-    )
-
+    embed = discord.Embed(title=titel, color=farbe)
     embed.add_field(name="👤 Bewerber", value=message.author.mention, inline=False)
     embed.add_field(name="📊 Bewertung", value=f"{punkte}/100", inline=True)
     embed.add_field(name="📌 Entscheidung", value=entscheidung, inline=True)
@@ -342,13 +375,10 @@ async def on_message(message):
         dm.add_field(name="📝 Analyse", value="\n".join(analyse)[:1000], inline=False)
 
         await message.author.send(embed=dm)
-
     except:
         print("DM konnte nicht gesendet werden.")
 
-    await message.channel.send(
-        "🔒 Dieses Bewerbungsticket wird in **30 Sekunden** automatisch geschlossen."
-    )
+    await message.channel.send("🔒 Dieses Bewerbungsticket wird in **30 Sekunden** automatisch geschlossen.")
 
     await asyncio.sleep(30)
 
@@ -358,19 +388,6 @@ async def on_message(message):
         print("Ticket konnte nicht gelöscht werden.")
 
     processing_tickets.discard(message.channel.id)
-
-
-@bot.tree.command(name="close_bewerbung", description="Schließt ein Bewerbungsticket")
-async def close_bewerbung(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_channels:
-        return await interaction.response.send_message("❌ Keine Rechte.", ephemeral=True)
-
-    if interaction.channel.name.startswith("bewerbung-"):
-        await interaction.response.send_message("✅ Ticket wird geschlossen.", ephemeral=True)
-        await asyncio.sleep(3)
-        await interaction.channel.delete()
-    else:
-        await interaction.response.send_message("❌ Das ist kein Bewerbungsticket.", ephemeral=True)
 
 
 bot.run(TOKEN)
