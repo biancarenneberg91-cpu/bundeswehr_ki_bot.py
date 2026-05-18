@@ -7,7 +7,7 @@ from datetime import datetime
 
 TOKEN = os.getenv("KI_TOKEN")
 
-GUILD_ID = 123456789012345678  # SERVER-ID EINTRAGEN
+GUILD_ID = 123456789012345678  # DEINE SERVER ID
 
 BEWERBUNG_CATEGORY_ID = 1504190916737368328
 PANEL_CHANNEL_ID = 1504203869130064035
@@ -83,10 +83,7 @@ def bewerbung_auswerten(text):
 
 async def speak(interaction, text, file_name="tts.mp3"):
     if not interaction.user.voice:
-        await interaction.followup.send(
-            "❌ Du bist in keinem Voicechannel.",
-            ephemeral=True
-        )
+        await interaction.followup.send("❌ Du bist in keinem Voicechannel.", ephemeral=True)
         return
 
     voice_channel = interaction.user.voice.channel
@@ -105,9 +102,9 @@ async def speak(interaction, text, file_name="tts.mp3"):
         vc.stop()
 
     ffmpeg_paths = [
-        "ffmpeg",
         "/usr/bin/ffmpeg",
-        "/nix/var/nix/profiles/default/bin/ffmpeg"
+        "/bin/ffmpeg",
+        "ffmpeg"
     ]
 
     last_error = None
@@ -119,28 +116,16 @@ async def speak(interaction, text, file_name="tts.mp3"):
                 executable=path
             )
             vc.play(audio)
+            await interaction.followup.send("🔊 Bot spricht jetzt.", ephemeral=True)
             return
         except Exception as e:
             last_error = e
 
     await interaction.followup.send(
-        "❌ FFmpeg wurde nicht gefunden. Prüfe Railway: NIXPACKS_PKGS=ffmpeg",
+        f"❌ FFmpeg Fehler: {last_error}",
         ephemeral=True
     )
     print(f"FFmpeg Fehler: {last_error}")
-
-
-@bot.event
-async def on_ready():
-    print(f"{bot.user} All-In-One System online!")
-
-    bot.add_view(BewerbungView())
-
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.copy_global_to(guild=guild)
-    synced = await bot.tree.sync(guild=guild)
-
-    print(f"{len(synced)} Commands geladen.")
 
 
 class BewerbungSelect(discord.ui.Select):
@@ -156,7 +141,7 @@ class BewerbungSelect(discord.ui.Select):
         super().__init__(
             placeholder="Bundeswehr",
             options=options,
-            custom_id="bundeswehr_bewerbung"
+            custom_id="bundeswehr_bewerbung_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -165,7 +150,7 @@ class BewerbungSelect(discord.ui.Select):
 
         if not isinstance(category, discord.CategoryChannel):
             return await interaction.response.send_message(
-                "❌ Kategorie nicht gefunden.",
+                "❌ Bewerbungs-Kategorie nicht gefunden.",
                 ephemeral=True
             )
 
@@ -176,7 +161,7 @@ class BewerbungSelect(discord.ui.Select):
 
         if existing:
             return await interaction.response.send_message(
-                f"⚠️ Du hast bereits ein Ticket: {existing.mention}",
+                f"⚠️ Du hast bereits ein Bewerbungsticket: {existing.mention}",
                 ephemeral=True
             )
 
@@ -214,7 +199,7 @@ class BewerbungSelect(discord.ui.Select):
                 "7. Warum sollen wir uns für sie entscheiden?\n"
                 "8. Für welche Kategorie wollen sie?\n"
                 "9. Sind sie bereit für ein Gespräch? Ja/Nein\n\n"
-                "⏳ Der Bot prüft automatisch nach 60 Sekunden."
+                "⏳ Nach deiner Nachricht wartet der Bot **60 Sekunden** und prüft automatisch."
             ),
             color=0x2E8B57
         )
@@ -233,6 +218,22 @@ class BewerbungView(discord.ui.View):
         self.add_item(BewerbungSelect())
 
 
+@bot.event
+async def on_ready():
+    print(f"{bot.user} All-In-One System online!")
+
+    bot.add_view(BewerbungView())
+
+    guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
+
+    try:
+        synced = await bot.tree.sync(guild=guild)
+        print(f"{len(synced)} Commands geladen.")
+    except Exception as e:
+        print(f"Command Sync Fehler: {e}")
+
+
 @bot.tree.command(name="bewerbung_panel", description="Sendet Bewerbungs Panel")
 async def bewerbung_panel(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -241,29 +242,22 @@ async def bewerbung_panel(interaction: discord.Interaction):
     panel_channel = interaction.guild.get_channel(PANEL_CHANNEL_ID)
 
     if not panel_channel:
-        return await interaction.response.send_message(
-            "❌ Panel-Channel nicht gefunden.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Panel-Channel nicht gefunden.", ephemeral=True)
 
     embed = discord.Embed(
-        title="📋 Appy Bot",
+        title="📋 Bewerbung",
         description="**Bundeswehr**\nBewerbt euch gerne",
         color=0x2E8B57
     )
 
     await panel_channel.send(embed=embed, view=BewerbungView())
-
     await interaction.response.send_message("✅ Panel gesendet.", ephemeral=True)
 
 
 @bot.tree.command(name="voice_join", description="Bot joint Voice")
 async def voice_join(interaction: discord.Interaction):
     if not interaction.user.voice:
-        return await interaction.response.send_message(
-            "❌ Du bist in keinem Voicechannel.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Du bist in keinem Voicechannel.", ephemeral=True)
 
     voice_channel = interaction.user.voice.channel
 
@@ -307,6 +301,19 @@ async def voice_leave(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Bot ist in keinem Voicechannel.", ephemeral=True)
 
 
+@bot.tree.command(name="close_bewerbung", description="Schließt Bewerbungsticket")
+async def close_bewerbung(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        return await interaction.response.send_message("❌ Keine Rechte.", ephemeral=True)
+
+    if interaction.channel.name.startswith("bewerbung-"):
+        await interaction.response.send_message("✅ Ticket wird geschlossen.", ephemeral=True)
+        await asyncio.sleep(3)
+        await interaction.channel.delete()
+    else:
+        await interaction.response.send_message("❌ Das ist kein Bewerbungsticket.", ephemeral=True)
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -348,13 +355,13 @@ async def on_message(message):
     check = kanal(message.guild, "bewerbungs-check")
 
     check_embed = discord.Embed(
-        title="🤖 KI Bewerbungsprüfung",
+        title="🤖 Bewerbungsprüfung",
         color=0x3498DB
     )
 
     check_embed.add_field(name="👤 Bewerber", value=message.author.mention, inline=False)
-    check_embed.add_field(name="📊 Bewertung", value=f"{punkte}/100")
-    check_embed.add_field(name="📌 Entscheidung", value=entscheidung)
+    check_embed.add_field(name="📊 Bewertung", value=f"{punkte}/100", inline=True)
+    check_embed.add_field(name="📌 Entscheidung", value=entscheidung, inline=True)
     check_embed.add_field(name="📝 Analyse", value="\n".join(analyse)[:1000], inline=False)
     check_embed.timestamp = datetime.now()
 
@@ -364,7 +371,8 @@ async def on_message(message):
     if entscheidung == "UNVOLLSTÄNDIG":
         await message.channel.send(
             "⚠️ Bewerbung unvollständig.\n"
-            f"Fehlende Punkte: {', '.join(fehlend)}"
+            f"Fehlende Punkte: {', '.join(fehlend)}\n\n"
+            "Bitte ergänze alles. Danach prüfe ich erneut."
         )
 
         processing_tickets.discard(message.channel.id)
@@ -381,7 +389,7 @@ async def on_message(message):
 
     result = discord.Embed(title=titel, color=farbe)
     result.add_field(name="👤 Bewerber", value=message.author.mention, inline=False)
-    result.add_field(name="📊 Bewertung", value=f"{punkte}/100")
+    result.add_field(name="📊 Bewertung", value=f"{punkte}/100", inline=True)
     result.add_field(name="📝 Analyse", value="\n".join(analyse)[:1000], inline=False)
 
     if ziel:
@@ -401,7 +409,7 @@ async def on_message(message):
     try:
         await message.channel.delete()
     except:
-        print("Löschen fehlgeschlagen")
+        print("Ticket konnte nicht gelöscht werden.")
 
     processing_tickets.discard(message.channel.id)
 
