@@ -6,8 +6,6 @@ import os
 
 TOKEN = os.getenv("KI_TOKEN")
 
-GUILD_ID = 1504190915235811360
-
 BEWERBUNG_CATEGORY_ID = 1504190916737368328
 PANEL_CHANNEL_ID = 1504203869130064035
 
@@ -27,8 +25,9 @@ def kanal(guild, name):
 async def bot_speak(guild, text):
     try:
         channel = guild.get_channel(BUERO_VOICE_CHANNEL_ID)
+
         if not channel:
-            print("❌ Büro Voicechannel nicht gefunden.")
+            print("Büro Voicechannel nicht gefunden.")
             return
 
         if guild.voice_client:
@@ -53,10 +52,10 @@ async def bot_speak(guild, text):
 
 async def move_to_buero(member):
     try:
-        buero = member.guild.get_channel(BUERO_VOICE_CHANNEL_ID)
-
         if not member.voice:
             return False
+
+        buero = member.guild.get_channel(BUERO_VOICE_CHANNEL_ID)
 
         if not buero:
             return False
@@ -106,7 +105,7 @@ def bewerbung_check(text):
         punkte += 10
         analyse.append("✅ Sehr gute Motivation erkannt.")
     elif gefunden >= 3:
-        analyse.append("🟡 Motivation ist vorhanden.")
+        analyse.append("🟡 Motivation vorhanden.")
     else:
         punkte -= 20
         analyse.append("❌ Zu wenig Motivation erkannt.")
@@ -255,11 +254,9 @@ async def on_ready():
 
     bot.add_view(BewerbungView())
 
-    guild = discord.Object(id=GUILD_ID)
-
     try:
-        synced = await bot.tree.sync(guild=guild)
-        print(f"{len(synced)} Commands geladen.")
+        synced = await bot.tree.sync()
+        print(f"{len(synced)} globale Commands geladen.")
     except Exception as e:
         print(f"SYNC FEHLER: {e}")
 
