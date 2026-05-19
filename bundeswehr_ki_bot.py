@@ -7,10 +7,12 @@ from datetime import datetime
 
 TOKEN = os.getenv("KI_TOKEN")
 
-GUILD_ID = 1504190915235811360  # DEINE SERVER ID
+GUILD_ID = 123456789012345678  # DEINE SERVER-ID EINTRAGEN
 
 BEWERBUNG_CATEGORY_ID = 1504190916737368328
 PANEL_CHANNEL_ID = 1504203869130064035
+AUTO_VOICE_CHANNEL_ID = 1506271397591126078
+BUERO_VOICE_CHANNEL_ID = 1506271506454544548
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -81,15 +83,12 @@ def bewerbung_auswerten(text):
     return punkte, analyse, entscheidung, fehlend
 
 
-async def speak(interaction, text, file_name="tts.mp3"):
-    if not interaction.user.voice:
-        await interaction.followup.send("❌ Du bist in keinem Voicechannel.", ephemeral=True)
-        return
+async def play_tts_in_channel(guild, voice_channel, text, file_name="tts.mp3"):
+    if not voice_channel:
+        return False
 
-    voice_channel = interaction.user.voice.channel
-
-    if interaction.guild.voice_client:
-        vc = interaction.guild.voice_client
+    if guild.voice_client:
+        vc = guild.voice_client
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
     else:
@@ -101,31 +100,30 @@ async def speak(interaction, text, file_name="tts.mp3"):
     if vc.is_playing():
         vc.stop()
 
-    ffmpeg_paths = [
-        "/usr/bin/ffmpeg",
-        "/bin/ffmpeg",
-        "ffmpeg"
-    ]
+    audio = discord.FFmpegPCMAudio(file_name, executable="ffmpeg")
+    vc.play(audio)
+    return True
 
-    last_error = None
 
-    for path in ffmpeg_paths:
-        try:
-            audio = discord.FFmpegPCMAudio(
-                file_name,
-                executable=path
-            )
-            vc.play(audio)
-            await interaction.followup.send("🔊 Bot spricht jetzt.", ephemeral=True)
-            return
-        except Exception as e:
-            last_error = e
+async def auto_speak(guild, text):
+    voice_channel = guild.get_channel(AUTO_VOICE_CHANNEL_ID)
 
-    await interaction.followup.send(
-        f"❌ FFmpeg Fehler: {last_error}",
-        ephemeral=True
-    )
-    print(f"FFmpeg Fehler: {last_error}")
+    try:
+        await play_tts_in_channel(guild, voice_channel, text, "auto_tts.mp3")
+    except Exception as e:
+        print(f"Auto Voice Fehler: {e}")
+
+
+async def speak(interaction, text, file_name="tts.mp3"):
+    if not interaction.user.voice:
+        await interaction.followup.send("❌ Du bist in keinem Voicechannel.", ephemeral=True)
+        return
+
+    try:
+        await play_tts_in_channel(interaction.guild, interaction.user.voice.channel, text, file_name)
+        await interaction.followup.send("🔊 Bot spricht jetzt.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Voice Fehler: {e}", ephemeral=True)
 
 
 class BewerbungSelect(discord.ui.Select):
@@ -206,6 +204,11 @@ class BewerbungSelect(discord.ui.Select):
 
         await channel.send(interaction.user.mention, embed=embed)
 
+        await auto_speak(
+            guild,
+            f"Neue Bundeswehr Bewerbung von {interaction.user.display_name} wurde erstellt."
+        )
+
         await interaction.response.send_message(
             f"✅ Bewerbung erstellt: {channel.mention}",
             ephemeral=True
@@ -278,6 +281,18 @@ async def sagen(interaction: discord.Interaction, text: str):
     await speak(interaction, text, "tts.mp3")
 
 
+@bot.tree.command(name="auto_sagen", description="Bot spricht automatisch im festen Voicechannel")
+async def auto_sagen(interaction: discord.Interaction, text: str):
+    await interaction.response.defer(ephemeral=True)
+
+    await auto_speak(interaction.guild, text)
+
+    await interaction.followup.send(
+        "🔊 Automatische Voice-Nachricht wurde gesendet.",
+        ephemeral=True
+    )
+
+
 @bot.tree.command(name="alarm_voice", description="Alarmansage")
 async def alarm_voice(interaction: discord.Interaction, stufe: str, ort: str):
     await interaction.response.defer(ephemeral=True)
@@ -290,6 +305,22 @@ async def alarm_voice(interaction: discord.Interaction, stufe: str, ort: str):
     )
 
     await speak(interaction, text, "alarm.mp3")
+
+
+@bot.tree.command(name="auto_alarm", description="Automatischer Alarm im festen Voicechannel")
+async def auto_alarm(interaction: discord.Interaction, stufe: str, ort: str):
+    await interaction.response.defer(ephemeral=True)
+
+    text = (
+        f"Achtung Achtung. "
+        f"Alarmstufe {stufe}. "
+        f"Einsatzort {ort}. "
+        f"Alle verfügbaren Einheiten sofort antreten."
+    )
+
+    await auto_speak(interaction.guild, text)
+
+    await interaction.followup.send("🚨 Auto-Alarm wurde gesprochen.", ephemeral=True)
 
 
 @bot.tree.command(name="voice_leave", description="Bot verlässt Voice")
@@ -340,6 +371,11 @@ async def on_message(message):
         "Ich warte jetzt **60 Sekunden** und prüfe danach automatisch."
     )
 
+    await auto_speak(
+        message.guild,
+        f"Bewerbung von {message.author.display_name} wurde erkannt. Prüfung startet in sechzig Sekunden."
+    )
+
     await asyncio.sleep(60)
 
     messages = []
@@ -375,6 +411,11 @@ async def on_message(message):
             "Bitte ergänze alles. Danach prüfe ich erneut."
         )
 
+        await auto_speak(
+            message.guild,
+            f"Die Bewerbung von {message.author.display_name} ist unvollständig."
+        )
+
         processing_tickets.discard(message.channel.id)
         return
 
@@ -382,10 +423,12 @@ async def on_message(message):
         ziel = kanal(message.guild, "annahmen")
         farbe = 0x00FF00
         titel = "✅ Bewerbung angenommen"
+        voice_text = f"Bewerbung von {message.author.display_name} wurde angenommen."
     else:
         ziel = kanal(message.guild, "ablehnungen")
         farbe = 0xFF0000
         titel = "❌ Bewerbung abgelehnt"
+        voice_text = f"Bewerbung von {message.author.display_name} wurde abgelehnt."
 
     result = discord.Embed(title=titel, color=farbe)
     result.add_field(name="👤 Bewerber", value=message.author.mention, inline=False)
@@ -396,6 +439,8 @@ async def on_message(message):
         await ziel.send(embed=result)
 
     await message.channel.send(embed=result)
+
+    await auto_speak(message.guild, voice_text)
 
     try:
         await message.author.send(embed=result)
