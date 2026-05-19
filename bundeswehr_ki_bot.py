@@ -415,40 +415,46 @@ async def on_message(message):
 
     processing_tickets.discard(message.channel.id)
 
-
-bot.run(TOKEN)
-@bot.tree.command(name="debug_voice", description="Prüft Voice Fehler")
+@bot.tree.command(
+    name="debug_voice",
+    description="Voice Debug"
+)
 async def debug_voice(interaction: discord.Interaction):
+
     channel_id = 1506271506454544548
-    channel = interaction.guild.get_channel(channel_id)
+
+    channel = interaction.guild.get_channel(
+        channel_id
+    )
 
     if not channel:
+
         return await interaction.response.send_message(
-            f"❌ Channel mit ID {channel_id} nicht gefunden.",
+            "❌ Voicechannel nicht gefunden.",
             ephemeral=True
         )
 
-    bot_member = interaction.guild.me
-    perms = channel.permissions_for(bot_member)
-
-    text = (
-        f"🔎 **Voice Debug**\n\n"
-        f"Channel: {channel.name}\n"
-        f"ID: {channel.id}\n\n"
-        f"Kanal ansehen: {perms.view_channel}\n"
-        f"Verbinden: {perms.connect}\n"
-        f"Sprechen: {perms.speak}\n"
-        f"Mitglieder verschieben: {perms.move_members}\n\n"
-    )
-
     try:
+
         if interaction.guild.voice_client:
-            await interaction.guild.voice_client.move_to(channel)
+
+            await interaction.guild.voice_client.move_to(
+                channel
+            )
+
         else:
+
             await channel.connect()
 
-        text += "✅ Bot konnte dem Voicechannel beitreten."
-    except Exception as e:
-        text += f"❌ Join Fehler: `{e}`"
+        await interaction.response.send_message(
+            f"✅ Bot ist in {channel.name} gejoint.",
+            ephemeral=True
+        )
 
-    await interaction.response.send_message(text, ephemeral=True)
+    except Exception as e:
+
+        await interaction.response.send_message(
+            f"❌ Fehler: {e}",
+            ephemeral=True
+        )
+bot.run(TOKEN)
