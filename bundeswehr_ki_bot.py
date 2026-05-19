@@ -7,11 +7,12 @@ from datetime import datetime
 
 TOKEN = os.getenv("KI_TOKEN")
 
-GUILD_ID = 1504190915235811360  # DEINE SERVER-ID EINTRAGEN
+GUILD_ID = 1504190915235811360
 
 BEWERBUNG_CATEGORY_ID = 1504190916737368328
 PANEL_CHANNEL_ID = 1504203869130064035
-AUTO_VOICE_CHANNEL_ID = 1506271397591126078
+
+WARTERAUM_VOICE_CHANNEL_ID = 1506271397591126078
 BUERO_VOICE_CHANNEL_ID = 1506271506454544548
 
 intents = discord.Intents.all()
@@ -83,8 +84,9 @@ def bewerbung_auswerten(text):
     return punkte, analyse, entscheidung, fehlend
 
 
-async def play_tts_in_channel(guild, voice_channel, text, file_name="tts.mp3"):
+async def play_tts(guild, voice_channel, text, file_name="tts.mp3"):
     if not voice_channel:
+        print("Voicechannel nicht gefunden.")
         return False
 
     if guild.voice_client:
@@ -106,24 +108,25 @@ async def play_tts_in_channel(guild, voice_channel, text, file_name="tts.mp3"):
 
 
 async def auto_speak(guild, text):
-    voice_channel = guild.get_channel(AUTO_VOICE_CHANNEL_ID)
+    buero = guild.get_channel(BUERO_VOICE_CHANNEL_ID)
 
     try:
-        await play_tts_in_channel(guild, voice_channel, text, "auto_tts.mp3")
+        await play_tts(guild, buero, text, "auto_tts.mp3")
     except Exception as e:
-        print(f"Auto Voice Fehler: {e}")
+        print(f"Voice Fehler: {e}")
 
 
-async def speak(interaction, text, file_name="tts.mp3"):
-    if not interaction.user.voice:
-        await interaction.followup.send("❌ Du bist in keinem Voicechannel.", ephemeral=True)
-        return
+async def move_to_buero(member):
+    buero = member.guild.get_channel(BUERO_VOICE_CHANNEL_ID)
 
-    try:
-        await play_tts_in_channel(interaction.guild, interaction.user.voice.channel, text, file_name)
-        await interaction.followup.send("🔊 Bot spricht jetzt.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Voice Fehler: {e}", ephemeral=True)
+    if member.voice and buero:
+        try:
+            await member.move_to(buero)
+            return True
+        except Exception as e:
+            print(f"Move Fehler: {e}")
+
+    return False
 
 
 class BewerbungSelect(discord.ui.Select):
@@ -137,7 +140,7 @@ class BewerbungSelect(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="Bundeswehr",
+            placeholder="Bundeswehr Bewerbung",
             options=options,
             custom_id="bundeswehr_bewerbung_select"
         )
@@ -159,7 +162,7 @@ class BewerbungSelect(discord.ui.Select):
 
         if existing:
             return await interaction.response.send_message(
-                f"⚠️ Du hast bereits ein Bewerbungsticket: {existing.mention}",
+                f"⚠️ Du hast bereits ein Ticket: {existing.mention}",
                 ephemeral=True
             )
 
@@ -197,17 +200,28 @@ class BewerbungSelect(discord.ui.Select):
                 "7. Warum sollen wir uns für sie entscheiden?\n"
                 "8. Für welche Kategorie wollen sie?\n"
                 "9. Sind sie bereit für ein Gespräch? Ja/Nein\n\n"
-                "⏳ Nach deiner Nachricht wartet der Bot **60 Sekunden** und prüft automatisch."
+                "⏳ Nach deiner Nachricht wartet der Bot **60 Sekunden** und prüft automatisch.\n"
+                "🔊 Wenn du im Warteraum bist, wirst du ins Büro verschoben und der Bot spricht dort."
             ),
             color=0x2E8B57
         )
 
         await channel.send(interaction.user.mention, embed=embed)
 
-        await auto_speak(
-            guild,
-            f"Neue Bundeswehr Bewerbung von {interaction.user.display_name} wurde erstellt."
-        )
+        moved = await move_to_buero(interaction.user)
+
+        if moved:
+            await auto_speak(
+                guild,
+                f"Willkommen {interaction.user.display_name}. "
+                f"Du bist jetzt im Bewerbungsbüro. "
+                f"Bitte beantworte die Fragen vollständig in deinem Bewerbungsticket."
+            )
+        else:
+            await auto_speak(
+                guild,
+                f"Neue Bewerbung von {interaction.user.display_name} wurde erstellt."
+            )
 
         await interaction.response.send_message(
             f"✅ Bewerbung erstellt: {channel.mention}",
@@ -223,7 +237,7 @@ class BewerbungView(discord.ui.View):
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user} All-In-One System online!")
+    print(f"{bot.user} Bewerbungssystem online!")
 
     bot.add_view(BewerbungView())
 
@@ -234,10 +248,10 @@ async def on_ready():
         synced = await bot.tree.sync(guild=guild)
         print(f"{len(synced)} Commands geladen.")
     except Exception as e:
-        print(f"Command Sync Fehler: {e}")
+        print(f"Sync Fehler: {e}")
 
 
-@bot.tree.command(name="bewerbung_panel", description="Sendet Bewerbungs Panel")
+@bot.tree.command(name="bewerbung_panel", description="Sendet Bewerbungspanel")
 async def bewerbung_panel(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Keine Rechte.", ephemeral=True)
@@ -245,7 +259,7 @@ async def bewerbung_panel(interaction: discord.Interaction):
     panel_channel = interaction.guild.get_channel(PANEL_CHANNEL_ID)
 
     if not panel_channel:
-        return await interaction.response.send_message("❌ Panel-Channel nicht gefunden.", ephemeral=True)
+        return await interaction.response.send_message("❌ Panelchannel nicht gefunden.", ephemeral=True)
 
     embed = discord.Embed(
         title="📋 Bewerbung",
@@ -257,77 +271,20 @@ async def bewerbung_panel(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Panel gesendet.", ephemeral=True)
 
 
-@bot.tree.command(name="voice_join", description="Bot joint Voice")
-async def voice_join(interaction: discord.Interaction):
-    if not interaction.user.voice:
-        return await interaction.response.send_message("❌ Du bist in keinem Voicechannel.", ephemeral=True)
-
-    voice_channel = interaction.user.voice.channel
-
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.move_to(voice_channel)
-    else:
-        await voice_channel.connect()
-
-    await interaction.response.send_message(
-        f"✅ Bot ist {voice_channel.name} beigetreten.",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="sagen", description="Bot spricht")
+@bot.tree.command(name="sagen", description="Bot spricht im Bewerbungsbüro")
 async def sagen(interaction: discord.Interaction, text: str):
     await interaction.response.defer(ephemeral=True)
-    await speak(interaction, text, "tts.mp3")
-
-
-@bot.tree.command(name="auto_sagen", description="Bot spricht automatisch im festen Voicechannel")
-async def auto_sagen(interaction: discord.Interaction, text: str):
-    await interaction.response.defer(ephemeral=True)
 
     await auto_speak(interaction.guild, text)
 
-    await interaction.followup.send(
-        "🔊 Automatische Voice-Nachricht wurde gesendet.",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="alarm_voice", description="Alarmansage")
-async def alarm_voice(interaction: discord.Interaction, stufe: str, ort: str):
-    await interaction.response.defer(ephemeral=True)
-
-    text = (
-        f"Achtung Achtung. "
-        f"Alarmstufe {stufe}. "
-        f"Einsatzort {ort}. "
-        f"Alle verfügbaren Einheiten sofort antreten."
-    )
-
-    await speak(interaction, text, "alarm.mp3")
-
-
-@bot.tree.command(name="auto_alarm", description="Automatischer Alarm im festen Voicechannel")
-async def auto_alarm(interaction: discord.Interaction, stufe: str, ort: str):
-    await interaction.response.defer(ephemeral=True)
-
-    text = (
-        f"Achtung Achtung. "
-        f"Alarmstufe {stufe}. "
-        f"Einsatzort {ort}. "
-        f"Alle verfügbaren Einheiten sofort antreten."
-    )
-
-    await auto_speak(interaction.guild, text)
-
-    await interaction.followup.send("🚨 Auto-Alarm wurde gesprochen.", ephemeral=True)
+    await interaction.followup.send("🔊 Bot hat gesprochen.", ephemeral=True)
 
 
 @bot.tree.command(name="voice_leave", description="Bot verlässt Voice")
 async def voice_leave(interaction: discord.Interaction):
     if interaction.guild.voice_client:
         await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("✅ Voice verlassen.", ephemeral=True)
+        await interaction.response.send_message("✅ Bot hat Voice verlassen.", ephemeral=True)
     else:
         await interaction.response.send_message("❌ Bot ist in keinem Voicechannel.", ephemeral=True)
 
@@ -382,7 +339,7 @@ async def on_message(message):
 
     async for msg in message.channel.history(limit=50, oldest_first=True):
         if not msg.author.bot:
-            messages.append(f"{msg.author}: {msg.content}")
+            messages.append(msg.content)
 
     kompletter_text = "\n".join(messages)
 
