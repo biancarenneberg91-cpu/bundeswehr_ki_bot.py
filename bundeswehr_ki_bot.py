@@ -516,47 +516,31 @@ async def sagen(
 # ZELLO
 # =========================================
 
-@bot.tree.command(
-    name="zello",
-    description="Zeigt die Zello Anleitung"
-)
+@bot.tree.command(name="zello", description="Zeigt die Zello Funk Anleitung")
 async def zello(interaction: discord.Interaction):
-
     embed = discord.Embed(
-
         title="📻 Bundeswehr Zello Funk",
-
         description=(
-
-            "📲 Zello herunterladen\n"
+            "📲 **Zello herunterladen**\n"
+            "Android / iPhone / PC\n"
             "https://zello.com\n\n"
-
-            "📷 QR-Code scannen\n"
-            "➜ Kanal hinzufügen\n"
-            "➜ QR-Code scannen\n\n"
-
-            "🎤 Funk benutzen\n"
-            "Push-To-Talk gedrückt halten.\n\n"
-
-            "📡 Funk Regeln\n"
+            "📷 **QR-Code**\n"
+            "Der QR-Code wird später separat gesendet.\n\n"
+            "🎤 **Funkname einstellen**\n"
+            "Beispiele:\n"
+            "• BW_Phil\n"
+            "• BW_Max\n"
+            "• BW_Leitung\n\n"
+            "📡 **Funk Regeln**\n"
+            "✅ Kurz sprechen\n"
             "✅ Kein Reinreden\n"
-            "✅ Keine Trolls\n"
-            "✅ Funkdisziplin"
-
+            "✅ Funkdisziplin\n"
+            "✅ Keine Musik / Trolls"
         ),
-
         color=0x8B0000
-
     )
 
-    file = discord.File(
-        "zello_qr.jpg",
-        filename="zello_qr.jpg"
-    )
-
-    embed.set_image(
-        url="attachment://zello_qr.jpg"
-    )
+    await interaction.response.send_message(embed=embed)
 
     await interaction.response.send_message(
         embed=embed,
