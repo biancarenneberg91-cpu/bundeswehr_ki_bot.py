@@ -781,5 +781,62 @@ async def on_message(message):
     processing_tickets.discard(
         message.channel.id
     )
+# =========================================
+# UPRANK COMMAND
+# =========================================
 
+@bot.tree.command(
+    name="uprank",
+    description="Sendet eine Beförderungs Nachricht"
+)
+async def uprank(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    user: discord.Member,
+    von: str,
+    auf: str,
+    grund: str
+):
+
+    embed = discord.Embed(
+        title="🚨 | Upranks",
+        color=0x2E8B57
+    )
+
+    embed.add_field(
+        name="Wer:",
+        value=user.mention,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Von:",
+        value=von,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Auf:",
+        value=auf,
+        inline=True
+    )
+
+    embed.add_field(
+        name="🪖 Grund:",
+        value=grund,
+        inline=False
+    )
+
+    embed.set_footer(
+        text="Bundeswehr Beförderungssystem"
+    )
+
+    await channel.send(
+        embed=embed
+    )
+
+    await interaction.response.send_message(
+        f"✅ Uprank wurde in {channel.mention} gesendet.",
+        ephemeral=True
+    )
 bot.run(TOKEN)
